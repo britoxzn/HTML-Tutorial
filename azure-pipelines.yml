@@ -1,19 +1,207 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+Com certeza! Baseado no nosso projeto "MetaXP" (plataforma de planejamento de metas com gamificação e IA) e assumindo uma arquitetura comum com um frontend em JavaScript (como React) e um backend em Node.js, criei um pipeline YAML completo e bem documentado.
 
+Este pipeline segue as melhores práticas de CI/CD (Integração Contínua e Implantação Contínua) no Azure Pipelines.
+
+Explicação do Pipeline
+Este pipeline é dividido em dois estágios principais:
+
+Build (Construção):
+
+CI (Integração Contínua): Este estágio é acionado sempre que há um push na branch main.
+
+Dois Jobs em Paralelo: Um para o Backend e outro para o Frontend, para otimizar o tempo de execução.
+
+Job do Backend: Instala as dependências do Node.js, executa testes e publica os artefatos (o código pronto para ser implantado) em um pacote.
+
+Job do Frontend: Instala as dependências, executa testes, gera os arquivos estáticos da aplicação (o "build") e também publica os artefatos.
+
+Deploy (Implantação):
+
+CD (Implantação Contínua): Este estágio depende da conclusão bem-sucedida do estágio Build.
+
+Dois Jobs de Implantação: Um para implantar a API (Backend) e outro para o site (Frontend) no Azure App Service (Serviço de Aplicativo do Azure).
+
+Download dos Artefatos: Cada job baixa o artefato correto que foi gerado no estágio de Build.
+
+Implantação: Utiliza a task AzureWebApp@1 para implantar o código nos respectivos Serviços de Aplicativo do Azure.
+
+Pré-requisitos no Azure
+Dois Serviços de Aplicativo (App Services):
+
+Um para o Backend (API), configurado para o runtime do Node.js.
+
+Um para o Frontend (Site), configurado para o runtime do Node.js (para servir os arquivos estáticos) ou usando a opção de "Site Estático".
+
+Conexão de Serviço (Service Connection): No seu projeto do Azure DevOps, você precisa criar uma "Conexão de Serviço" para autorizar o pipeline a acessar sua assinatura do Azure e fazer a implantação.
+
+Código do Pipeline (azure-pipelines.yml)
+Copie e cole este código no arquivo azure-pipelines.yml na raiz do seu repositório.
+
+YAML
+
+# Nome do Pipeline
+name: MetaXP CI/CD Pipeline
+
+# Gatilho: Executa este pipeline em cada push para a branch 'main'
 trigger:
 - main
 
-pool:
-  vmImage: ubuntu-latest
+# Variáveis: Centralize valores que podem mudar ou ser reutilizados
+variables:
+  # Configurações do Projeto
+  backendDirectory: 'backend'
+  frontendDirectory: 'frontend'
+  
+  # Configurações do Azure
+  # IMPORTANTE: Crie uma Conexão de Serviço no Azure DevOps e use o nome dela aqui.
+  azureServiceConnection: 'SuaConexaoDeServicoAzure' 
+  azureResourceGroup: 'rg-metaxp-producao' # Nome do seu Grupo de Recursos
+  backendAppName: 'api-metaxp' # Nome do seu App Service para o Backend
+  frontendAppName: 'app-metaxp' # Nome do seu App Service para o Frontend
+  
+  # Configurações de Build
+  vmImage: 'ubuntu-latest'
+  nodeVersion: '18.x'
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+# Estágios do Pipeline (Build e Deploy)
+stages:
+- stage: Build
+  displayName: 'Build e Teste'
+  jobs:
+  - job: BuildBackend
+    displayName: 'Build Backend API'
+    pool:
+      vmImage: $(vmImage)
+    
+    steps:
+    - task: NodeTool@0
+      displayName: 'Instalar Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: $(nodeVersion)
+        
+    - script: |
+        cd $(backendDirectory)
+        npm install
+      displayName: 'Instalar dependências do Backend'
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+    - script: |
+        cd $(backendDirectory)
+        npm test
+      displayName: 'Executar testes do Backend'
+
+    # Arquiva os arquivos do backend em um .zip para ser usado como artefato de build
+    - task: ArchiveFiles@2
+      displayName: 'Arquivar artefato do Backend'
+      inputs:
+        rootFolderOrFile: '$(backendDirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/backend.zip'
+        replaceExistingArchive: true
+
+    # Publica o artefato para que o estágio de Deploy possa usá-lo
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publicar artefato do Backend'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/backend.zip'
+        ArtifactName: 'backend'
+
+  - job: BuildFrontend
+    displayName: 'Build Frontend App'
+    pool:
+      vmImage: $(vmImage)
+      
+    steps:
+    - task: NodeTool@0
+      displayName: 'Instalar Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: $(nodeVersion)
+
+    - script: |
+        cd $(frontendDirectory)
+        npm install
+      displayName: 'Instalar dependências do Frontend'
+
+    - script: |
+        cd $(frontendDirectory)
+        npm test
+      displayName: 'Executar testes do Frontend'
+
+    - script: |
+        cd $(frontendDirectory)
+        npm run build
+      displayName: 'Gerar build de produção do Frontend'
+
+    - task: ArchiveFiles@2
+      displayName: 'Arquivar artefato do Frontend'
+      inputs:
+        rootFolderOrFile: '$(frontendDirectory)/build' # A pasta padrão de build do React
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/frontend.zip'
+        replaceExistingArchive: true
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publicar artefato do Frontend'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/frontend.zip'
+        ArtifactName: 'frontend'
+
+
+- stage: Deploy
+  displayName: 'Implantação em Produção'
+  dependsOn: Build # Garante que o Build foi concluído com sucesso
+  condition: succeeded()
+  jobs:
+  - deployment: DeployBackend
+    displayName: 'Deploy Backend API'
+    environment: 'Producao' # Nome do ambiente no Azure DevOps
+    pool:
+      vmImage: $(vmImage)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          # Baixa o artefato 'backend' publicado no estágio de Build
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download do artefato do Backend'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'backend'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          # Implanta no Azure App Service
+          - task: AzureWebApp@1
+            displayName: 'Deploy Backend no Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webAppLinux' # Ou 'webApp' se for Windows
+              appName: $(backendAppName)
+              package: '$(System.ArtifactsDirectory)/backend/backend.zip'
+              runtimeStack: 'NODE|$(nodeVersion)'
+
+  - deployment: DeployFrontend
+    displayName: 'Deploy Frontend App'
+    environment: 'Producao'
+    pool:
+      vmImage: $(vmImage)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download do artefato do Frontend'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'frontend'
+              downloadPath: '$(System.ArtifactsDirectory)'
+              
+          - task: AzureWebApp@1
+            displayName: 'Deploy Frontend no Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webAppLinux'
+              appName: $(frontendAppName)
+              package: '$(System.ArtifactsDirectory)/frontend/frontend.zip'
