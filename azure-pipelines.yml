@@ -89,7 +89,6 @@ stages:
         npm test
       displayName: 'Executar testes do Backend'
 
-    # Arquiva os arquivos do backend em um .zip para ser usado como artefato de build
     - task: ArchiveFiles@2
       displayName: 'Arquivar artefato do Backend'
       inputs:
@@ -99,7 +98,6 @@ stages:
         archiveFile: '$(Build.ArtifactStagingDirectory)/backend.zip'
         replaceExistingArchive: true
 
-    # Publica o artefato para que o estágio de Deploy possa usá-lo
     - task: PublishBuildArtifacts@1
       displayName: 'Publicar artefato do Backend'
       inputs:
@@ -135,7 +133,7 @@ stages:
     - task: ArchiveFiles@2
       displayName: 'Arquivar artefato do Frontend'
       inputs:
-        rootFolderOrFile: '$(frontendDirectory)/build' # A pasta padrão de build do React
+        rootFolderOrFile: '$(frontendDirectory)/build'
         includeRootFolder: false
         archiveType: 'zip'
         archiveFile: '$(Build.ArtifactStagingDirectory)/frontend.zip'
@@ -150,19 +148,18 @@ stages:
 
 - stage: Deploy
   displayName: 'Implantação em Produção'
-  dependsOn: Build # Garante que o Build foi concluído com sucesso
+  dependsOn: Build
   condition: succeeded()
   jobs:
   - deployment: DeployBackend
     displayName: 'Deploy Backend API'
-    environment: 'Producao' # Nome do ambiente no Azure DevOps
+    environment: 'Producao'
     pool:
       vmImage: $(vmImage)
     strategy:
       runOnce:
         deploy:
           steps:
-          # Baixa o artefato 'backend' publicado no estágio de Build
           - task: DownloadBuildArtifacts@1
             displayName: 'Download do artefato do Backend'
             inputs:
@@ -171,12 +168,11 @@ stages:
               artifactName: 'backend'
               downloadPath: '$(System.ArtifactsDirectory)'
 
-          # Implanta no Azure App Service
           - task: AzureWebApp@1
             displayName: 'Deploy Backend no Azure App Service'
             inputs:
               azureSubscription: $(azureServiceConnection)
-              appType: 'webAppLinux' # Ou 'webApp' se for Windows
+              appType: 'webAppLinux'
               appName: $(backendAppName)
               package: '$(System.ArtifactsDirectory)/backend/backend.zip'
               runtimeStack: 'NODE|$(nodeVersion)'
